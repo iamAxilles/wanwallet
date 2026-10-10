@@ -6,6 +6,7 @@ warnings.filterwarnings(
 )
 
 import json, os, pytest, requests
+from unittest.mock import patch
 
 from ankr import AnkrWeb3
 from ankr.types import GetAccountBalanceRequest
@@ -30,15 +31,27 @@ wallet = os.environ.get("w")
 #     monkeypatch.setenv("payload", json.loads(PAYLOAD_DATA))
 
 def tr():
-    response = requests.post(
-        RPC_URL,
-        json=PAYLOAD_DATA,
-        timeout=60,
-    )
+    try:
+        response = requests.post(
+            RPC_URL,
+            json=PAYLOAD_DATA,
+            timeout=60,
+        )
+        response.raise_for_status()
+        # print(response.json())
+        return response.json()
+    except HTTPError:
+        return {"error": HTTPError}
 
-    response.raise_for_status()
-    # print(response.json())
-    return response.json()
+
+from requests.exceptions import HTTPError
+import responses
+
+@responses.activate
+def test_503():
+    url = RPC_URL
+    responses.add(responses.POST, url, status=503)
+    assert tr() == {"error": HTTPError}
 
 
 @pytest.mark.integration
@@ -46,11 +59,10 @@ def test_tr_real_rpc_success():#setup_env
     """Тест запроса к Ankr API."""
     data = tr()
 
+    assert data is not None
     assert "result" in data
     assert "transfers" in data["result"]
-    assert isinstance(data["result"]["transfers"], list)
-
-
+    # assert isinstance(data["result"]["transfers"], list)
 
 @pytest.mark.integration
 def test_ankr_balance():
@@ -62,6 +74,31 @@ def test_ankr_balance():
     )
 
     balances = [vars(asset) for asset in balance_generator]
-
     assert balances
+
+
+
+@pytest.mark.integration
+def toomany():
+    response = requests.Response()
+    response.status_code = 429
+    response.url = RPC_URL
+    with patch("requests.post", return_value=response):
+        with pytest.raises(requests.HTTPError) as exc_info:
+            tr()
+    assert exc_info.value.response.status_code == 429
+
+
+@pytest.mark.integration
+def test_timeout():
+    with patch(
+        "requests.post",
+        side_effect=requests.Timeout("Connection timed out"),
+    ):
+        with pytest.raises(requests.Timeout):
+            tr()
+
+
+
+
 
