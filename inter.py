@@ -5,7 +5,7 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-import json, os, pytest, requests
+import json, os, pytest, requests, responses
 from unittest.mock import patch
 
 from ankr import AnkrWeb3
@@ -29,6 +29,7 @@ wallet = os.environ.get("w")
 # def setup_env(monkeypatch):
 #     monkeypatch.setenv("RPC", RPC_URL)
 #     monkeypatch.setenv("payload", json.loads(PAYLOAD_DATA))
+from requests.exceptions import HTTPError
 
 def tr():
     try:
@@ -38,33 +39,34 @@ def tr():
             timeout=60,
         )
         response.raise_for_status()
-        # print(response.json())
+        # print(response.status_code)
         return response.json()
-    except HTTPError:
-        return {"error": HTTPError}
+    except HTTPError as e:
+        return {"error": e}
 
-
-from requests.exceptions import HTTPError
-import responses
 
 @responses.activate
-def test_503():
-    url = RPC_URL
-    responses.add(responses.POST, url, status=503)
-    assert tr() == {"error": HTTPError}
+def test_503Unavailable():
+    responses.add(responses.POST, RPC_URL, status=503)
+    assert tr()["error"].response.status_code == 503
 
 
-@pytest.mark.integration
+@responses.activate
+def test_toomany():
+    responses.add(responses.POST, RPC_URL, status=429)
+    assert tr()["error"].response.status_code == 429
+
+
+@pytest.mark.inter
 def test_tr_real_rpc_success():#setup_env
-    """Тест запроса к Ankr API."""
+    """Тест запроса к Ankr."""
     data = tr()
-
     assert data is not None
     assert "result" in data
     assert "transfers" in data["result"]
     # assert isinstance(data["result"]["transfers"], list)
 
-@pytest.mark.integration
+@pytest.mark.inter
 def test_ankr_balance():
     balance_generator = ankr_w3.token.get_account_balance(
         request=GetAccountBalanceRequest(
@@ -77,19 +79,7 @@ def test_ankr_balance():
     assert balances
 
 
-
-@pytest.mark.integration
-def toomany():
-    response = requests.Response()
-    response.status_code = 429
-    response.url = RPC_URL
-    with patch("requests.post", return_value=response):
-        with pytest.raises(requests.HTTPError) as exc_info:
-            tr()
-    assert exc_info.value.response.status_code == 429
-
-
-@pytest.mark.integration
+@pytest.mark.inter
 def test_timeout():
     with patch(
         "requests.post",
